@@ -21,7 +21,7 @@ jobs:
     
     - name: Set up Rust for cross-compilation
       run: |
-        rustup target add --toolchain arm-unknown-linux-gnueabihf arm-unknown-linux-gnueabihf
+        rustup target install arm-unknown-linux-gnueabihf
     
     - name: Rust environment info
       run: |
@@ -39,4 +39,4 @@ jobs:
     - name: Build librespot
       run: |
         cd /tmp/librespot
-        cargo build --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend with-avahi"
+        cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend with-avahi"
