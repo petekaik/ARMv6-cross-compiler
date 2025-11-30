@@ -22,6 +22,16 @@ jobs:
     - name: Install Rust
       run: |
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    
+    - name: Rust environment info
+      run: |
+        echo "Rust settings: /home/runner/.rustup/settings.toml"
+        cat /home/runner/.rustup/settings.toml
+        echo "Rust toolchain:"
+        rustup show
+        rustup toolchain list
+        echo "Environment variables:"
+        env | grep RUST
 
     - name: Set up and update build environment
       run: |
