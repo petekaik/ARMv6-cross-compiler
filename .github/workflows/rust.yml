@@ -21,7 +21,7 @@ jobs:
     
     - name: Set up Rust for cross-compilation
       run: |
-        rustup target add arm-unknown-linux-gnueabihf
+        rustup target add --target arm-unknown-linux-gnueabihf arm-unknown-linux-gnueabihf
     
     - name: Rust environment info
       run: |
