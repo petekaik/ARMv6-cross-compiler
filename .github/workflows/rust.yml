@@ -26,8 +26,6 @@ jobs:
         echo "Rust toolchain:"
         rustup show
         rustup toolchain list
-        echo "Environment variables:"
-        env | grep RUST
 
     - name: Set up and update build environment
       run: |
@@ -37,5 +35,4 @@ jobs:
     - name: Build librespot
       run: |
         cd /tmp/librespot
-        cargo build --verbose --no-default-features --features "rustls-tls-webpki-roots alsa-backend with-avahi"
-
+        cargo build --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend with-avahi"
