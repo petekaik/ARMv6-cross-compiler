@@ -22,12 +22,25 @@ jobs:
     - name: Set up and update build environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y pkg-config build-essential libasound2-dev libpulse-dev libavahi-client-dev gcc-arm-linux-gnueabihf
+        sudo apt-get install -y \
+          pkg-config build-essential \
+          gcc-arm-linux-gnueabihf \
+          # ARMHF (KOHDEALUSTAN) KIRJASTOT
+          libasound2-dev:armhf \
+          libpulse-dev:armhf \
+          libavahi-client-dev:armhf
+
+    - name: Configure PKG_CONFIG for Cross-Compilation
+      run: |
+        # Ohjaa pkg-config löytämään ARM-kirjastojen .pc-tiedostot
+        echo "PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig" >> $GITHUB_ENV
+        # Määritellään systeemin juurikansio
+        echo "PKG_CONFIG_SYSROOT_DIR=/" >> $GITHUB_ENV
 
     - name: Configure Cargo Linker for ARM
       run: |
         mkdir -p ~/.cargo/
-        echo "[target.armv6-unknown-linux-gnueabihf]" >> ~/.cargo/config.toml
+        echo "[target.arm-unknown-linux-gnueabihf]" >> ~/.cargo/config.toml
         echo "linker = \"arm-linux-gnueabihf-gcc\"" >> ~/.cargo/config.toml
         cat ~/.cargo/config.toml
 
