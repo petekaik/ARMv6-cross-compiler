@@ -18,10 +18,6 @@ jobs:
     - name: Clone librespot repository
       run: |
         git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot
-
-    - name: Install Rust
-      run: |
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     
     - name: Rust environment info
       run: |
