@@ -132,20 +132,19 @@ jobs:
         name: librespot-armhf-raw-binary
         path: /tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot
     
-    - name: Create .deb package with FPM
+    - name: 📦 Create .deb package with FPM
       id: package
       run: |
         VERSION=$(date +%Ym%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
         OUTPUT_NAME="librespot_${VERSION}_armhf.deb"
         
-        fpm -s dir -t deb -a armhf -n librespot -v ${VERSION} \
+        fpm -s dir -t deb --config-files /etc/default/librespot -a armhf -n librespot -v ${VERSION} \
             --maintainer "Oma Nimesi <email@esimerkki.com>" \
             --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" \
             -p ${OUTPUT_NAME} \
             --deb-systemd \
             --after-install packaging/postinst \
-            --config-files /etc/default/librespot \
             
             packaging/librespot.default=/etc/default/librespot \
             packaging/librespot.service=/etc/systemd/system/librespot.service \
