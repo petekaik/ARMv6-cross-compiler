@@ -40,22 +40,44 @@ jobs:
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-    - name: Cargo Cache
+    - name: Cargo Registry Cache
       uses: actions/cache@v3
       with:
-        path: |
-          ~/.cargo/registry
-          /tmp/librespot/target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-v1
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-v1-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-
+          ${{ runner.os }}-cargo-registry-v1-
 
     - name: Checkout this repository
       uses: actions/checkout@v4
 
-    - name: Clone librespot repository
+    - name: Update or clone librespot repository
+      id: update_repo
       run: |
-        git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot
+        REPO_URL="https://github.com/librespot-org/librespot.git"
+        REPO_PATH="/tmp/librespot"
+        
+        if [ -d "$REPO_PATH" ]; then
+          echo "Librespot repository found. Updating..."
+          cd "$REPO_PATH"
+          git fetch origin
+          git reset --hard origin/HEAD
+        else
+          echo "Librespot repository not found. Cloning..."
+          git clone --depth 1 "$REPO_URL" "$REPO_PATH"
+          cd "$REPO_PATH"
+        fi
+        
+        LATEST_HASH=$(git rev-parse --short HEAD)
+        echo "LIBRESPOT_COMMIT_HASH=$LATEST_HASH" >> $GITHUB_ENV
+
+    - name: Librespot Build Artifacts Cache
+      uses: actions/cache@v3
+      with:
+        path: /tmp/librespot/target/
+        key: ${{ runner.os }}-librespot-build-v1-${{ env.LIBRESPOT_COMMIT_HASH }}
+        restore-keys: |
+          ${{ runner.os }}-librespot-build-v1-
 
     - name: Set up and update build environment for ARM cross-compilation and packaging
       run: |
