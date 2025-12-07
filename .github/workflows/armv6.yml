@@ -63,11 +63,17 @@ jobs:
     
     - name: Log Rust environment info
       run: |
-        echo "Rust settings: /home/runner/.rustup/settings.toml"
-        cat /home/runner/.rustup/settings.toml
-        echo "Rust toolchain:"
-        rustup show
+        echo "Installed toolchains:"
         rustup toolchain list
+
+        echo "Active toolchain:"
+        rustup show
+
+        echo "Installed targets for stable:"
+        rustup target list --installed --toolchain stable
+
+        echo "Contents of ~/.rustup:"
+        ls -R ~/.rustup || true
 
     - name: Build librespot
       run: |
