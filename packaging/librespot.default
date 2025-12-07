@@ -1,0 +1,2 @@
+DEVICE_NAME="My Librespot Device"
+OPTIONS="--backend pulseaudio --bitrate 160 --username XXXX --password YYYY"

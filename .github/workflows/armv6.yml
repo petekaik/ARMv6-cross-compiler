@@ -52,12 +52,12 @@ jobs:
 
     - name: Checkout this repository
       uses: actions/checkout@v4
-      
+
     - name: Clone librespot repository
       run: |
         git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot
 
-    - name: Set up and update build environment for ARM cross-compilation
+    - name: Set up and update build environment for ARM cross-compilation and packaging
       run: |
         dpkg --add-architecture armhf
         apt-get update
@@ -65,7 +65,9 @@ jobs:
           gcc-arm-linux-gnueabihf \
           libasound2-dev:armhf \
           libpulse-dev:armhf \
-          libavahi-client-dev:armhf
+          libavahi-client-dev:armhf \
+          ruby rubygems
+        gem install fpm
 
     - name: Configure PKG_CONFIG for Cross-Compilation
       run: |
@@ -102,35 +104,49 @@ jobs:
         cd /tmp/librespot
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend with-avahi"
 
-    - name: Upload librespot ARM binaries
+    - name: Upload raw librespot ARM binary (Optional Debug Artifact)
       uses: actions/upload-artifact@v4
       with:
-        name: librespot-armhf-binaries
+        name: librespot-armhf-raw-binary
         path: /tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot
     
-    - name: Configure release artifacts
-      id: prepare_release
+    - name: Create .deb package with FPM
+      id: package
       run: |
-        ARTIFACT_NAME="librespot-armv6-$(date +%Y%m%d%H%M%S)"
+        VERSION=$(date +%Y%m%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
-        RELEASE_DIR="./release_artifacts"
-
-        mkdir -p ${RELEASE_DIR}
         
-        cp ${BIN_PATH} ${RELEASE_DIR}/librespot-armv6-linux-gnueabihf
-        
-        echo "TAG_NAME=${ARTIFACT_NAME}" >> $GITHUB_ENV
-        echo "RELEASE_FILE=${RELEASE_DIR}/librespot-armv6-linux-gnueabihf" >> $GITHUB_ENV
+        fpm -s dir -t deb \
+            -a armhf \
+            -n librespot \
+            -v ${VERSION} \
+            --maintainer "Oma Nimesi <email@esimerkki.com>" \
+            --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" \
+            --deb-systemd /etc/systemd/system/librespot.service=packaging/librespot.service \
+            --after-install packaging/postinst \
+            --config-files /etc/default/librespot \
+            packaging/librespot.default=/etc/default/librespot \
+            -p librespot_${VERSION}_armhf.deb \
+            ${BIN_PATH}=/usr/bin/librespot
+            
+        echo "TAG_NAME=v${VERSION}" >> $GITHUB_ENV
+        echo "DEB_PACKAGE_NAME=librespot_${VERSION}_armhf.deb" >> $GITHUB_ENV
 
-    - name: Create GitHub Release for ARMv6 build
+    - name: Upload generated .deb package as Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: librespot-debian-package
+        path: ${{ env.DEB_PACKAGE_NAME }}
+
+    - name: Create GitHub Release for ARMv6 package
       if: github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ env.TAG_NAME }}
-        name: Librespot ARMv6 Build ${{ env.TAG_NAME }}
+        tag_name: ${{ env.TAG_NAME }} # Esim. v20251207202100
+        name: Librespot ARMv6 Package ${{ env.TAG_NAME }}
         body: |
-          Automated cross-compiled build for Raspberry Pi Zero W (ARMv6).
+          Automated cross-compiled Debian package (.deb) for Raspberry Pi Zero W (ARMv6/armhf).
         files: |
-          ${{ env.RELEASE_FILE }}
+          ${{ env.DEB_PACKAGE_NAME }} # Liitetään luotu .deb-tiedosto

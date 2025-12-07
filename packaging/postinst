@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -e
+
+# Check if user 'librespot' exists, if not, create it
+if ! id "librespot" >/dev/null 2>&1; then
+    # Create a system user and group for librespot without home directory
+    adduser --system --no-create-home --group librespot
+fi
+
+# Update systemd to recognize the new service and enable it
+if [ "$1" = "configure" ]; then
+    systemctl daemon-reload
+    systemctl enable librespot
+fi
+
+exit 0
