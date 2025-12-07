@@ -79,3 +79,36 @@ jobs:
       run: |
         cd /tmp/librespot
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend with-avahi"
+
+    - name: Upload librespot ARM binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: librespot-armhf-binaries
+        path: /tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot
+    
+    - name: Configure release artifacts
+      id: prepare_release
+      run: |
+        ARTIFACT_NAME="librespot-armv6-$(date +%Y%m%d%H%M%S)"
+        BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
+        RELEASE_DIR="./release_artifacts"
+
+        mkdir -p ${RELEASE_DIR}
+        
+        cp ${BIN_PATH} ${RELEASE_DIR}/librespot-armv6-linux-gnueabihf
+        
+        echo "TAG_NAME=${ARTIFACT_NAME}" >> $GITHUB_ENV
+        echo "RELEASE_FILE=${RELEASE_DIR}/librespot-armv6-linux-gnueabihf" >> $GITHUB_ENV
+
+    - name: Create GitHub Release for ARMv6 build
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ env.TAG_NAME }}
+        name: Librespot ARMv6 Build ${{ env.TAG_NAME }}
+        body: |
+          Automated cross-compiled build for Raspberry Pi Zero W (ARMv6).
+        files: |
+          ${{ env.RELEASE_FILE }}
