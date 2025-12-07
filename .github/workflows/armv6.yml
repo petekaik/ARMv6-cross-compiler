@@ -20,8 +20,14 @@ jobs:
       run: |
         apt-get update
         apt-get install -y \
-          git pkg-config build-essential
+          git pkg-config \
+          build-essential curl
 
+    - name: Install Rust
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+ 
     - name: Checkout this repository
       uses: actions/checkout@v4
 
