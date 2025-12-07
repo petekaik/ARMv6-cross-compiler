@@ -25,15 +25,34 @@ jobs:
         apt-get install -y \
           git pkg-config \
           build-essential curl
+      
+    - name: APT Cache
+      id: apt-cache
+      uses: actions/cache@v3
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-bullseye-apt-v1-${{ hashFiles('**/Dockerfile.builder') }}
+        restore-keys: |
+          ${{ runner.os }}-bullseye-apt-v1-
 
     - name: Install Rust
       run: |
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
- 
+
+    - name: Cargo Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          /tmp/librespot/target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-v1
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
     - name: Checkout this repository
       uses: actions/checkout@v4
-
+      
     - name: Clone librespot repository
       run: |
         git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot
