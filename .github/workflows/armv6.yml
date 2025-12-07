@@ -138,15 +138,18 @@ jobs:
         VERSION=$(date +%Ym%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
         OUTPUT_NAME="librespot_${VERSION}_armhf.deb"
+        SCRIPT_PATH="$(cd packaging && pwd)/postinst"
         
         fpm -s dir -t deb \
-            --config-files /etc/default/librespot \
-            -a armhf -n librespot -v "${VERSION}" \
+            -a armhf \
+            -n librespot \
+            -v "${VERSION}" \
             --maintainer "More Cowbell <email@github.com>" \
             --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" \
-            -p "${OUTPUT_NAME}" \
+            --config-files /etc/default/librespot \
             --deb-systemd \
-            --after-install "$(pwd)/packaging/postinst" \
+            --after-install "${SCRIPT_PATH}" \
+            -p "${OUTPUT_NAME}" \
             "$(pwd)/packaging/librespot.default=/etc/default/librespot" \
             "$(pwd)/packaging/librespot.service=/etc/systemd/system/librespot.service" \
             "${BIN_PATH}=/usr/bin/librespot"
