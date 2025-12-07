@@ -146,6 +146,7 @@ jobs:
             --deb-systemd \
             --after-install packaging/postinst \
             --config-files /etc/default/librespot \
+            
             packaging/librespot.default=/etc/default/librespot \
             packaging/librespot.service=/etc/systemd/system/librespot.service \
             ${BIN_PATH}=/usr/bin/librespot
