@@ -138,7 +138,8 @@ jobs:
         VERSION=$(date +%Ym%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
         OUTPUT_NAME="librespot_${VERSION}_armhf.deb"
-        SCRIPT_PATH="$(cd packaging && pwd)/postinst"
+        
+        SCRIPT_PATH="$(pwd)/packaging/postinst"
         
         fpm -s dir -t deb \
             -a armhf \
@@ -150,6 +151,7 @@ jobs:
             --config-files /etc/default/librespot \
             --deb-systemd \
             --after-install "${SCRIPT_PATH}" \
+            \
             "$(pwd)/packaging/librespot.default=/etc/default/librespot" \
             "$(pwd)/packaging/librespot.service=/etc/systemd/system/librespot.service" \
             "${BIN_PATH}=/usr/bin/librespot"
