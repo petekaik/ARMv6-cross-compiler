@@ -131,33 +131,43 @@ jobs:
       with:
         name: librespot-armhf-raw-binary
         path: /tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot
-    
-    - name: Create .deb package with FPM
-      id: package
+
+    - name: Create packaging script for .deb package
+      id: generate_script
       run: |
         VERSION=$(date +%Ym%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
         OUTPUT_NAME="librespot_${VERSION}_armhf.deb"
         
-        SCRIPT_PATH="$(pwd)/packaging/postinst"
+        POSTINST_ABS="$(pwd)/packaging/postinst"
+        DEFAULT_ABS="$(pwd)/packaging/librespot.default"
+        SERVICE_ABS="$(pwd)/packaging/librespot.service"
+        
+        cat <<EOF > /tmp/run_fpm.sh
+        #!/bin/bash
         
         fpm -s dir -t deb \
-            -a armhf \
-            -n librespot \
-            -v "${VERSION}" \
-            -p "${OUTPUT_NAME}" \
+            -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" \
             --maintainer "More Cowbell <email@github.com>" \
             --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" \
-            --config-files /etc/default/librespot \
             --deb-systemd \
-            --after-install "${SCRIPT_PATH}" \
-            \
-            "$(pwd)/packaging/librespot.default=/etc/default/librespot" \
-            "$(pwd)/packaging/librespot.service=/etc/systemd/system/librespot.service" \
+            --config-files /etc/default/librespot \
+            --after-install "\$POSTINST_ABS" \
+            "\$DEFAULT_ABS=/etc/default/librespot" \
+            "\$SERVICE_ABS=/etc/systemd/system/librespot.service" \
             "${BIN_PATH}=/usr/bin/librespot"
-            
+        
+        EOF
+        
+        chmod +x /tmp/run_fpm.sh
+        
         echo "TAG_NAME=v${VERSION}" >> $GITHUB_ENV
         echo "DEB_PACKAGE_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
+    
+    - name: Run packaging script to create .deb package
+      id: package
+      run: |
+        /tmp/run_fpm.sh
 
     - name: Upload generated .deb package as Artifact
       uses: actions/upload-artifact@v4
