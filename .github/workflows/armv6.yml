@@ -162,9 +162,9 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ env.TAG_NAME }} # Esim. v20251207202100
+        tag_name: ${{ env.TAG_NAME }}
         name: Librespot ARMv6 Package ${{ env.TAG_NAME }}
         body: |
           Automated cross-compiled Debian package (.deb) for Raspberry Pi Zero W (ARMv6/armhf).
         files: |
-          ${{ env.DEB_PACKAGE_NAME }} # Liitetään luotu .deb-tiedosto
+          ${{ env.DEB_PACKAGE_NAME }}
