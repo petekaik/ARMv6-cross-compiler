@@ -124,7 +124,7 @@ jobs:
     - name: Build librespot
       run: |
         cd /tmp/librespot
-        cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulse-backend with-avahi"
+        cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
 
     - name: Upload raw librespot ARM binary (Optional Debug Artifact)
       uses: actions/upload-artifact@v4
