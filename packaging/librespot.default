@@ -1,2 +1,3 @@
-DEVICE_NAME="My Librespot Device"
-OPTIONS="--backend pulseaudio --bitrate 160 --username XXXX --password YYYY"
+# /etc/default/librespot configuration file
+DEVICE_NAME=$(hostname)
+DAEMON_ARGS="--name '$DEVICE_NAME' --backend pulseaudio --initial-volume 75 --device-type speaker --bitrate 160 --cache /tmp --cache-size-limit 50M --autoplay"

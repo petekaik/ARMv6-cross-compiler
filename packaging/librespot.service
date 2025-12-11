@@ -1,10 +1,15 @@
 [Unit]
 Description=Librespot Spotify Daemon
+Documentation=https://github.com/librespot-org/librespot
+Documentation=https://github.com/librespot-org/librespot/wiki/Options
+Wants=network-online.target sound.target
 After=network-online.target sound.target
 
 [Service]
-ExecStart=/usr/bin/librespot
+EnvironmentFile=-/etc/default/librespot
+ExecStart=/usr/bin/librespot $DAEMON_ARGS
 Restart=always
+RestartSec=10
 User=librespot
 Group=librespot
 

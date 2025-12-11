@@ -8,6 +8,11 @@ if ! id "librespot" >/dev/null 2>&1; then
     adduser --system --no-create-home --group librespot
 fi
 
+# Add 'librespot' user to 'audio' group for audio device access
+if ! id -nG "librespot" | grep -qw "audio"; then
+    adduser librespot audio
+fi
+
 # Update systemd to recognize the new service and enable it
 if [ "$1" = "configure" ]; then
     systemctl daemon-reload
