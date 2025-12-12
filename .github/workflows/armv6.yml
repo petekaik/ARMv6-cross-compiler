@@ -136,7 +136,7 @@ jobs:
     - name: Upload raw librespot ARM binary (Optional Debug Artifact)
       uses: actions/upload-artifact@v4
       with:
-        name: librespot-armhf-raw-binary
+        name: librespot-armhf-raw-binary-${{ matrix.debian_distro }}
         path: /tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot
 
     - name: Create .deb package with FPM
@@ -161,7 +161,7 @@ jobs:
     - name: Upload generated .deb package as Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: librespot-debian-package-${{ env.DISTRO_NAME }}
+        name: librespot-debian-package-${{ matrix.debian_distro }} 
         path: ${{ env.DEB_PACKAGE_NAME }}
 
     - name: Create GitHub Release for ARMv6 package
