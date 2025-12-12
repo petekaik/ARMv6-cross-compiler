@@ -11,12 +11,19 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        debian_distro: [bullseye, bookworm, wheezy]
+
     container:
-      image: debian:bullseye
+      image: debian:${{ matrix.debian_distro }}
       options: --user root
     
     permissions:
       contents: write
+
+    name: Build librespot for ARMv6 on Debian ${{ matrix.debian_distro }}
 
     steps:
     - name: Set up and update build environment base
@@ -31,9 +38,9 @@ jobs:
       uses: actions/cache@v3
       with:
         path: /var/cache/apt/archives
-        key: ${{ runner.os }}-bullseye-apt-v1-${{ hashFiles('**/Dockerfile.builder') }}
+        key: ${{ runner.os }}-${{ matrix.debian_distro }}-apt-v1-${{ hashFiles('**/Dockerfile.builder') }}
         restore-keys: |
-          ${{ runner.os }}-bullseye-apt-v1-
+          ${{ runner.os }}-${{ matrix.debian_distro }}-apt-v1-
 
     - name: Install Rust
       run: |
@@ -138,6 +145,7 @@ jobs:
         VERSION=$(date +%Y%m%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
         OUTPUT_NAME="librespot_${VERSION}_armhf.deb"
+        echo "DISTRO_NAME=${{ matrix.debian_distro }}" >> $GITHUB_ENV
         
         POSTINST_ABS="$(pwd)/packaging/postinst"
         DEFAULT_ABS="$(pwd)/packaging/librespot.default"
@@ -147,13 +155,13 @@ jobs:
         
         fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" --maintainer "More Cowbell <email@github.com>" --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" --config-files /etc/default/librespot --after-install "${POSTINST_ABS}" --deb-systemd "${SERVICE_ABS}" "${DEFAULT_ABS}=/etc/default/librespot" "${BIN_PATH}=/usr/bin/librespot"
             
-        echo "TAG_NAME=v${VERSION}" >> $GITHUB_ENV
-        echo "DEB_PACKAGE_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
+        echo "TAG_NAME=v${VERSION}-${{ env.DISTRO_NAME }}" >> $GITHUB_ENV # Päivitetty
+        echo "DEB_PACKAGE_NAME=librespot_${VERSION}_armhf_${{ env.DISTRO_NAME }}.deb" >> $GITHUB_ENV
 
     - name: Upload generated .deb package as Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: librespot-debian-package
+        name: librespot-debian-package-${{ env.DISTRO_NAME }}
         path: ${{ env.DEB_PACKAGE_NAME }}
 
     - name: Create GitHub Release for ARMv6 package
@@ -165,6 +173,6 @@ jobs:
         tag_name: ${{ env.TAG_NAME }}
         name: Librespot ARMv6 Package ${{ env.TAG_NAME }}
         body: |
-          Automated cross-compiled Debian package (.deb) for Raspberry Pi Zero W (ARMv6/armhf).
+          Automated cross-compiled Debian package (.deb) for Raspberry Pi Zero W (ARMv6/armhf) on Debian ${{ env.DISTRO_NAME }}.
         files: |
           ${{ env.DEB_PACKAGE_NAME }}
