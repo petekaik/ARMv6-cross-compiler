@@ -131,6 +131,8 @@ jobs:
     - name: Build librespot
       run: |
         cd /tmp/librespot
+        export RUSTFLAGS="-C target-feature=+v6,+vfp2"
+        export CFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
 
     - name: Upload raw librespot ARM binary (Optional Debug Artifact)

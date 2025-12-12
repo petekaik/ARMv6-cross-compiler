@@ -7,4 +7,4 @@ Install dependencies:
 - PulseAudio
 - Avahi
 
-sudo apt install pulseaudio libpulse0 libasound2 libavahi-client3
+sudo apt install pulseaudio libavahi-client3
