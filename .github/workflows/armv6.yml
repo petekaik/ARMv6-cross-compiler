@@ -144,19 +144,19 @@ jobs:
       run: |
         VERSION=$(date +%Y%m%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
-        OUTPUT_NAME="librespot_${VERSION}_armhf.deb"
-        echo "DISTRO_NAME=${{ matrix.debian_distro }}" >> $GITHUB_ENV
+        DISTRO_NAME="${{ matrix.debian_distro }}"
+        OUTPUT_NAME="librespot_${VERSION}_armhf_${DISTRO_NAME}.deb"
         
         POSTINST_ABS="$(pwd)/packaging/postinst"
         DEFAULT_ABS="$(pwd)/packaging/librespot.default"
         SERVICE_ABS="$(pwd)/packaging/librespot.service"
         
-        echo "Packaging version: $VERSION"
+        echo "Packaging version: $VERSION for $DISTRO_NAME"
         
         fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" --maintainer "More Cowbell <email@github.com>" --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" --config-files /etc/default/librespot --after-install "${POSTINST_ABS}" --deb-systemd "${SERVICE_ABS}" "${DEFAULT_ABS}=/etc/default/librespot" "${BIN_PATH}=/usr/bin/librespot"
             
-        echo "TAG_NAME=v${VERSION}-${{ env.DISTRO_NAME }}" >> $GITHUB_ENV # Päivitetty
-        echo "DEB_PACKAGE_NAME=librespot_${VERSION}_armhf_${{ env.DISTRO_NAME }}.deb" >> $GITHUB_ENV
+        echo "TAG_NAME=v${VERSION}-${DISTRO_NAME}" >> $GITHUB_ENV
+        echo "DEB_PACKAGE_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
 
     - name: Upload generated .deb package as Artifact
       uses: actions/upload-artifact@v4
