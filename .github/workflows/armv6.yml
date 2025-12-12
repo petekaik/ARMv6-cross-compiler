@@ -14,7 +14,7 @@ jobs:
 
     strategy:
       matrix:
-        debian_distro: [bullseye, bookworm, wheezy]
+        debian_distro: [bullseye, bookworm, trixie]
 
     container:
       image: debian:${{ matrix.debian_distro }}
