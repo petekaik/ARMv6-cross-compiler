@@ -151,19 +151,15 @@ jobs:
         DEFAULT_ABS="$(pwd)/packaging/librespot.default"
         SERVICE_ABS="$(pwd)/packaging/librespot.service"
 
-        DEPENDS_PULSE="libpulse0"
-        DEPENDS_AVAHI="libavahi-client3"
-        DEPENDS_ALSA="libasound2"
-
-        if [ "${{ matrix.debian_distro }}" != "bullseye" ]; then
-            DEPENDS_ALSA="libasound2t64"
+        if [ "$DISTRO_NAME" != "bullseye" ]; then
+            ALSA_PKG="libasound2t64"
+        else
+            ALSA_PKG="libasound2"
         fi
-
-        DEPENDENCY_LIST="--depends ${DEPENDS_PULSE} --depends ${DEPENDS_ALSA} --depends ${DEPENDS_AVAHI}"
         
         echo "Packaging version: $VERSION for $DISTRO_NAME"
         
-        fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" --maintainer "More Cowbell <email@github.com>" --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" --config-files /etc/default/librespot "${DEPENDENCY_LIST}" --after-install "${POSTINST_ABS}" --deb-systemd "${SERVICE_ABS}" "${DEFAULT_ABS}=/etc/default/librespot" "${BIN_PATH}=/usr/bin/librespot"
+        fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" --maintainer "More Cowbell <email@github.com>" --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" --config-files /etc/default/librespot --depends libpulse0 --depends "$ALSA_PKG" --depends libavahi-client3 --after-install "${POSTINST_ABS}" --deb-systemd "${SERVICE_ABS}" "${DEFAULT_ABS}=/etc/default/librespot" "${BIN_PATH}=/usr/bin/librespot"
             
         echo "TAG_NAME=v${VERSION}-${DISTRO_NAME}" >> $GITHUB_ENV
         echo "DEB_PACKAGE_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
