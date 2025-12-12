@@ -108,6 +108,7 @@ jobs:
         mkdir -p ~/.cargo/
         echo "[target.arm-unknown-linux-gnueabihf]" >> ~/.cargo/config.toml
         echo "linker = \"arm-linux-gnueabihf-gcc\"" >> ~/.cargo/config.toml
+        echo "rustflags = [\"-C\", \"target-cpu=arm1176jzf-s\"]" >> ~/.cargo/config.toml
         cat ~/.cargo/config.toml
 
     - name: Set up Rust for cross-compilation
