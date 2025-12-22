@@ -7,6 +7,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RPI_TOOLCHAIN_PATH: /opt/rpi-tools
+  RPI_TOOLCHAIN_NAME: arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian
 
 jobs:
   build:
@@ -91,23 +93,20 @@ jobs:
         dpkg --add-architecture armhf
         apt-get update
         apt-get install -y \
-          gcc-arm-linux-gnueabihf \
           libasound2-dev:armhf \
           libpulse-dev:armhf \
           libavahi-client-dev:armhf \
           ruby rubygems
         gem install fpm
-
-    - name: Configure PKG_CONFIG for Cross-Compilation
-      run: |
-        echo "PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig" >> $GITHUB_ENV
-        echo "PKG_CONFIG_SYSROOT_DIR=/" >> $GITHUB_ENV
+        git clone --depth 1 https://github.com/raspberrypi/tools.git ${{ env.RPI_TOOLCHAIN_PATH }}
 
     - name: Configure Cargo Linker for ARM
       run: |
+        RPI_GCC_PATH="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin"
+        echo "${RPI_GCC_PATH}" >> $GITHUB_PATH
         mkdir -p ~/.cargo/
         echo "[target.arm-unknown-linux-gnueabihf]" >> ~/.cargo/config.toml
-        echo "linker = \"arm-linux-gnueabihf-gcc\"" >> ~/.cargo/config.toml
+        echo "linker = \"${RPI_GCC_PATH}/arm-linux-gnueabihf-gcc\"" >> ~/.cargo/config.toml
         echo "rustflags = [\"-C\", \"target-cpu=arm1176jzf-s\"]" >> ~/.cargo/config.toml
         cat ~/.cargo/config.toml
 
@@ -132,7 +131,6 @@ jobs:
     - name: Build librespot
       run: |
         cd /tmp/librespot
-        export RUSTFLAGS="-C target-feature=+v6,+vfp2 -C target-cpu=arm1176jzf-s"
         export CFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
         export CXXFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
