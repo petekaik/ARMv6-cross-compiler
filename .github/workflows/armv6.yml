@@ -131,7 +131,7 @@ jobs:
         # Build with rustls to avoid OpenSSL native dependencies
         cargo build --target=arm-unknown-linux-gnueabihf --release \
           --no-default-features \
-          --features "rustls-tls rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+          --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
 
     - name: Validate Binary Architecture (ARMv6 Check)
       run: |
