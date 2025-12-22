@@ -63,16 +63,19 @@ jobs:
     - name: Configure Cargo for ARMv6
       run: |
         mkdir -p ~/.cargo/
-        cat <<EOF > ~/.cargo/config.toml
+        cat <<'EOF' > ~/.cargo/config.toml
         [target.arm-unknown-linux-gnueabihf]
         linker = "arm-linux-gnueabihf-gcc"
         rustflags = [
           "-C", "target-cpu=arm1176jzf-s",
-          "-C", "target-feature=+vfp",
+          "-C", "target-feature=+vfp2,-neon,-thumb-mode",
           "-C", "link-arg=-march=armv6",
           "-C", "link-arg=-mfpu=vfp",
           "-C", "link-arg=-mfloat-abi=hard"
         ]
+        
+        [build]
+        target = "arm-unknown-linux-gnueabihf"
         EOF
         rustup target add arm-unknown-linux-gnueabihf
 
@@ -95,35 +98,40 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-
 
-    - name: Build librespot (Forced ARMv6 with Wrapper)
+    - name: Build librespot (Forced ARMv6)
       run: |
         cd /tmp/librespot
         
-        # 1. Luodaan wrapper-skripti kääntäjälle
-        # Tämä pakottaa ARMv6-liput jokaiselle kääntökerralle, ohittaen oletukset
-        cat <<EOF > /tmp/arm-gcc-wrapper.sh
+        # Create wrapper script that FORCES ARMv6 for ALL compilation
+        cat <<'EOF' > /tmp/arm-gcc-wrapper.sh
         #!/bin/bash
-        exec arm-linux-gnueabihf-gcc -march=armv6kz -mfpu=vfp -mfloat-abi=hard "\$@"
+        exec arm-linux-gnueabihf-gcc -march=armv6 -mfpu=vfp -mfloat-abi=hard -marm "$@"
         EOF
         chmod +x /tmp/arm-gcc-wrapper.sh
-
-        # 2. Asetetaan ympäristömuuttujat käyttämään wrapperia
+        
+        # Set ALL environment variables to force ARMv6
         export CC_arm_unknown_linux_gnueabihf=/tmp/arm-gcc-wrapper.sh
         export CC=/tmp/arm-gcc-wrapper.sh
+        export AR_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar
+        export AR=arm-linux-gnueabihf-ar
+        export CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER=/tmp/arm-gcc-wrapper.sh
         
-        # 3. Pakotetaan Rust ja muut työkalut kuriin
+        # PKG config for cross compilation
         export PKG_CONFIG_ALLOW_CROSS=1
         export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+        export PKG_CONFIG_SYSROOT_DIR=/
         
-        # Lisätään -neon ja vfp2 varmistukset
-        export RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp2,-neon -C linker=/tmp/arm-gcc-wrapper.sh"
+        # Force ARMv6 in all C compilation (for build.rs scripts)
+        export CFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard -marm"
+        export CXXFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard -marm"
         
-        # Erityisesti 'ring'-kirjastolle (tämä on usein se joka vuotaa v7-koodia)
-        export CFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
+        # Rust flags - disable features that require ARMv7
+        export RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp2,-neon,-thumb-mode -C linker=/tmp/arm-gcc-wrapper.sh"
         
+        # Build with rustls to avoid OpenSSL native dependencies
         cargo build --target=arm-unknown-linux-gnueabihf --release \
           --no-default-features \
-          --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+          --features "rustls-tls rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
 
     - name: Validate Binary Architecture (ARMv6 Check)
       run: |
@@ -135,8 +143,17 @@ jobs:
         
         if echo "$ARCH_INFO" | grep -q "Tag_CPU_arch: v6"; then
           echo "✅ Validation passed: Binary is ARMv6 compatible."
+        elif echo "$ARCH_INFO" | grep -q "Tag_CPU_arch: v7"; then
+          echo "❌ ERROR: Binary is ARMv7, not ARMv6!"
+          echo ""
+          echo "Analyzing which dependencies may have caused ARMv7 code..."
+          # Show all object files in the build
+          find /tmp/librespot/target/arm-unknown-linux-gnueabihf/release -name "*.rlib" -o -name "*.a" | head -20
+          exit 1
         else
-          echo "❌ ERROR: Binary is NOT ARMv6! Detected architecture is incorrect."
+          echo "⚠️  WARNING: Could not determine CPU architecture definitively."
+          echo "Full readelf output:"
+          echo "$ARCH_INFO"
           exit 1
         fi
 
@@ -144,6 +161,8 @@ jobs:
           echo "❌ ERROR: Binary contains NEON instructions, which are not supported on Pi Zero W!"
           exit 1
         fi
+
+        echo "✅ All validations passed! Binary is safe for Raspberry Pi Zero W."
 
     - name: Create .deb package with FPM
       id: package
