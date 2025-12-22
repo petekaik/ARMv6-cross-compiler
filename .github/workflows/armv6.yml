@@ -1,4 +1,4 @@
-name: Build librespot for armv6
+name: Build librespot for ARMv6
 
 on:
   workflow_dispatch: {}
@@ -7,8 +7,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RPI_TOOLCHAIN_PATH: /opt/rpi-tools
-  RPI_TOOLCHAIN_NAME: arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian
 
 jobs:
   build:
@@ -30,67 +28,13 @@ jobs:
     steps:
     - name: Set up and update build environment base
       run: |
-        dpkg --add-architecture i386
         apt-get update
         apt-get install -y \
-          git pkg-config \
-          build-essential curl \
-          libc6:i386 libstdc++6:i386 zlib1g:i386
+          git pkg-config build-essential curl ruby rubygems \
+          gcc-arm-linux-gnueabihf
+        gem install fpm
       
-    - name: APT Cache
-      id: apt-cache
-      uses: actions/cache@v3
-      with:
-        path: /var/cache/apt/archives
-        key: ${{ runner.os }}-${{ matrix.debian_distro }}-apt-v1-${{ hashFiles('**/Dockerfile.builder') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ matrix.debian_distro }}-apt-v1-
-
-    - name: Install Rust
-      run: |
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-    - name: Cargo Registry Cache
-      uses: actions/cache@v3
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-v1-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-registry-v1-
-
-    - name: Checkout this repository
-      uses: actions/checkout@v4
-
-    - name: Update or clone librespot repository
-      id: update_repo
-      run: |
-        REPO_URL="https://github.com/librespot-org/librespot.git"
-        REPO_PATH="/tmp/librespot"
-        
-        if [ -d "$REPO_PATH" ]; then
-          echo "Librespot repository found. Updating..."
-          cd "$REPO_PATH"
-          git fetch origin
-          git reset --hard origin/HEAD
-        else
-          echo "Librespot repository not found. Cloning..."
-          git clone --depth 1 "$REPO_URL" "$REPO_PATH"
-          cd "$REPO_PATH"
-        fi
-        
-        LATEST_HASH=$(git rev-parse --short HEAD)
-        echo "LIBRESPOT_COMMIT_HASH=$LATEST_HASH" >> $GITHUB_ENV
-
-    - name: Librespot Build Artifacts Cache
-      uses: actions/cache@v3
-      with:
-        path: /tmp/librespot/target/
-        key: ${{ runner.os }}-librespot-build-v1-${{ env.LIBRESPOT_COMMIT_HASH }}
-        restore-keys: |
-          ${{ runner.os }}-librespot-build-v1-
-
-    - name: Set up and update build environment for ARM cross-compilation and packaging
+    - name: Set up ARMhf dependencies
       run: |
         dpkg --add-architecture armhf
         apt-get update
@@ -98,97 +42,102 @@ jobs:
           libasound2-dev:armhf \
           libpulse-dev:armhf \
           libavahi-client-dev:armhf \
-          ruby rubygems
-        gem install fpm
-        git clone --depth 1 https://github.com/raspberrypi/tools.git ${{ env.RPI_TOOLCHAIN_PATH }}
+          libdbus-1-dev:armhf
 
-    - name: Configure Cargo Linker for ARM
+    - name: Install Rust
       run: |
-        RPI_GCC_PATH="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin"
-        echo "${RPI_GCC_PATH}" >> $GITHUB_PATH
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Checkout this repository
+      uses: actions/checkout@v4
+
+    - name: Clone librespot repository
+      run: |
+        REPO_URL="https://github.com/librespot-org/librespot.git"
+        REPO_PATH="/tmp/librespot"
+        git clone --depth 1 "$REPO_URL" "$REPO_PATH"
+        cd "$REPO_PATH"
+        echo "LIBRESPOT_COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+    - name: Configure Cargo for ARMv6
+      run: |
         mkdir -p ~/.cargo/
-        echo "[target.arm-unknown-linux-gnueabihf]" >> ~/.cargo/config.toml
-        echo "linker = \"${RPI_GCC_PATH}/arm-linux-gnueabihf-gcc\"" >> ~/.cargo/config.toml
-        echo "rustflags = [\"-C\", \"target-cpu=arm1176jzf-s\"]" >> ~/.cargo/config.toml
-        cat ~/.cargo/config.toml
+        cat <<EOF > ~/.cargo/config.toml
+        [target.arm-unknown-linux-gnueabihf]
+        linker = "arm-linux-gnueabihf-gcc"
+        rustflags = [
+          "-C", "target-cpu=arm1176jzf-s",
+          "-C", "link-arg=-Wl,-rpath-link,/usr/lib/arm-linux-gnueabihf"
+        ]
+        EOF
+        rustup target add arm-unknown-linux-gnueabihf
 
-    - name: Set up Rust for cross-compilation
-      run: |
-        rustup target add arm-unknown-linux-gnueabihf --toolchain stable
-    
-    - name: Log Rust environment info
-      run: |
-        echo "Installed toolchains:"
-        rustup toolchain list
+    - name: Cargo Registry Cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('/tmp/librespot/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
 
-        echo "Active toolchain:"
-        rustup show
-
-        echo "Installed targets for stable:"
-        rustup target list --installed --toolchain stable
-
-        echo "Contents of ~/.rustup:"
-        ls -R ~/.rustup || true
+    - name: Cargo Target Cache
+      uses: actions/cache@v4
+      with:
+        path: /tmp/librespot/target
+        key: ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-${{ env.LIBRESPOT_COMMIT_HASH }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-
 
     - name: Build librespot
       run: |
         cd /tmp/librespot
-        RPI_GCC="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin/arm-linux-gnueabihf-gcc"
-        export CC_arm_unknown_linux_gnueabihf="$RPI_GCC"
-        export AR_arm_unknown_linux_gnueabihf="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin/arm-linux-gnueabihf-ar"
+        
+        # Cross-compilation environment variables
         export PKG_CONFIG_ALLOW_CROSS=1
-        export PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig
-        export PKG_CONFIG_PATH=""
-        export CFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
-        export CXXFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
+        export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+        export CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
+        
+        export CFLAGS_arm_unknown_linux_gnueabihf="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+        
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
-
-    - name: Upload raw librespot ARM binary (Optional Debug Artifact)
-      uses: actions/upload-artifact@v4
-      with:
-        name: librespot-armhf-raw-binary-${{ matrix.debian_distro }}
-        path: /tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot
 
     - name: Create .deb package with FPM
       id: package
       run: |
         VERSION=$(date +%Y%m%d%H%M%S)
         BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
-        DISTRO_NAME="${{ matrix.debian_distro }}"
-        OUTPUT_NAME="librespot_${VERSION}_armhf_${DISTRO_NAME}.deb"
+        OUTPUT_NAME="librespot_${VERSION}_armhf_${{ matrix.debian_distro }}.deb"
         
-        POSTINST_ABS="$(pwd)/packaging/postinst"
-        DEFAULT_ABS="$(pwd)/packaging/librespot.default"
-        SERVICE_ABS="$(pwd)/packaging/librespot.service"
-
-        if [ "$DISTRO_NAME" != "bullseye" ]; then
-            ALSA_PKG="libasound2t64"
-        else
+        if [ "${{ matrix.debian_distro }}" = "bullseye" ]; then
             ALSA_PKG="libasound2"
+        else
+            ALSA_PKG="libasound2t64"
         fi
         
-        echo "Packaging version: $VERSION for $DISTRO_NAME"
-        
-        fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" --maintainer "More Cowbell <email@github.com>" --description "Librespot (Spotify connect client) for ARMv6/Raspberry Pi" --config-files /etc/default/librespot --depends libpulse0 --depends "$ALSA_PKG" --depends libavahi-client3 --after-install "${POSTINST_ABS}" --deb-systemd "${SERVICE_ABS}" "${DEFAULT_ABS}=/etc/default/librespot" "${BIN_PATH}=/usr/bin/librespot"
+        fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" --maintainer "Build-Bot <email@github.com>" --description "Librespot for ARMv6 (Raspberry Pi Zero W) on ${{ matrix.debian_distro }}" --depends libpulse0 --depends "$ALSA_PKG" --depends libavahi-client3 --depends libdbus-1-3 --after-install "packaging/postinst" --deb-systemd "packaging/librespot.service" "packaging/librespot.default=/etc/default/librespot" "${BIN_PATH}=/usr/bin/librespot"
             
-        echo "TAG_NAME=v${VERSION}-${DISTRO_NAME}" >> $GITHUB_ENV
+        echo "TAG_NAME=v${VERSION}-${{ matrix.debian_distro }}" >> $GITHUB_ENV
         echo "DEB_PACKAGE_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
 
-    - name: Upload generated .deb package as Artifact
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: librespot-debian-package-${{ matrix.debian_distro }} 
+        name: librespot-${{ matrix.debian_distro }} 
         path: ${{ env.DEB_PACKAGE_NAME }}
 
-    - name: Create GitHub Release for ARMv6 package
+    - name: Create GitHub Release
       if: github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ env.TAG_NAME }}
-        name: Librespot ARMv6 Package ${{ env.TAG_NAME }}
+        name: Librespot ARMv6 (${{ matrix.debian_distro }})
         body: |
-          Automated cross-compiled Debian package (.deb) for Raspberry Pi Zero W (ARMv6/armhf) on Debian ${{ matrix.debian_distro }}.
-        files: |
-          ${{ env.DEB_PACKAGE_NAME }}
+          Automated build for ARMv6 (Raspberry Pi Zero/1).
+          Target OS: Debian ${{ matrix.debian_distro }}
+        files: ${{ env.DEB_PACKAGE_NAME }}
