@@ -95,20 +95,28 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-
 
-    - name: Build librespot
+    - name: Build librespot (Forced ARMv6)
       run: |
         cd /tmp/librespot
         
-        export CFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
-        export CXXFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+        export CFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
+        export CXXFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
         
+        export ST_TARGET=armv6
         export CROSS_COMPILE=arm-linux-gnueabihf-
         
         export PKG_CONFIG_ALLOW_CROSS=1
         export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
-        export CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
         
-        cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+        export RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp,-neon -C link-arg=-march=armv6kz -C link-arg=-mfpu=vfp -C link-arg=-mfloat-abi=hard"
+        
+        export CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
+        export CXX_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++
+        export AR_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar
+
+        cargo build --target=arm-unknown-linux-gnueabihf --release \
+          --no-default-features \
+          --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
 
     - name: Validate Binary Architecture (ARMv6 Check)
       run: |
