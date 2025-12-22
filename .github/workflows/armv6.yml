@@ -95,33 +95,32 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-
 
-    - name: Build librespot (Forced ARMv6)
+    - name: Build librespot (Forced ARMv6 with Wrapper)
       run: |
         cd /tmp/librespot
         
-        # 1. Pakotetaan C-kääntäjän liput kaikille työkaluille (cc-rs, jne.)
-        # armv6kz on Pi Zeron tarkka arkkitehtuuri
-        export CFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
-        export CXXFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
+        # 1. Luodaan wrapper-skripti kääntäjälle
+        # Tämä pakottaa ARMv6-liput jokaiselle kääntökerralle, ohittaen oletukset
+        cat <<EOF > /tmp/arm-gcc-wrapper.sh
+        #!/bin/bash
+        exec arm-linux-gnueabihf-gcc -march=armv6kz -mfpu=vfp -mfloat-abi=hard "\$@"
+        EOF
+        chmod +x /tmp/arm-gcc-wrapper.sh
+
+        # 2. Asetetaan ympäristömuuttujat käyttämään wrapperia
+        export CC_arm_unknown_linux_gnueabihf=/tmp/arm-gcc-wrapper.sh
+        export CC=/tmp/arm-gcc-wrapper.sh
         
-        # 2. Erityisesti 'ring'-cratea varten
-        # Se vaatii nämä muuttujat toimiakseen oikein ARMv6:lla ilman NEONia
-        export ST_TARGET=armv6
-        export CROSS_COMPILE=arm-linux-gnueabihf-
-        
-        # 3. Pkg-config asetukset ristiinkääntöön
+        # 3. Pakotetaan Rust ja muut työkalut kuriin
         export PKG_CONFIG_ALLOW_CROSS=1
         export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
         
-        # 4. Pakotetaan Rust-kääntäjä ja linkkeri pysymään ARMv6-rajojen sisällä
-        # '-neon' poistaa NEON-tuen nimenomaisesti käytöstä
-        export RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp,-neon -C link-arg=-march=armv6kz -C link-arg=-mfpu=vfp -C link-arg=-mfloat-abi=hard"
+        # Lisätään -neon ja vfp2 varmistukset
+        export RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp2,-neon -C linker=/tmp/arm-gcc-wrapper.sh"
         
-        # 5. Määritetään kääntäjätyökalut nimenomaisesti
-        export CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
-        export CXX_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++
-        export AR_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar
-
+        # Erityisesti 'ring'-kirjastolle (tämä on usein se joka vuotaa v7-koodia)
+        export CFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
+        
         cargo build --target=arm-unknown-linux-gnueabihf --release \
           --no-default-features \
           --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
