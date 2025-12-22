@@ -30,10 +30,12 @@ jobs:
     steps:
     - name: Set up and update build environment base
       run: |
+        dpkg --add-architecture i386
         apt-get update
         apt-get install -y \
           git pkg-config \
-          build-essential curl
+          build-essential curl \
+          libc6:i386 libstdc++6:i386 zlib1g:i386
       
     - name: APT Cache
       id: apt-cache
@@ -131,6 +133,9 @@ jobs:
     - name: Build librespot
       run: |
         cd /tmp/librespot
+        RPI_GCC="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin/arm-linux-gnueabihf-gcc"
+        export CC_arm_unknown_linux_gnueabihf="$RPI_GCC"
+        export AR_arm_unknown_linux_gnueabihf="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin/arm-linux-gnueabihf-ar"
         export CFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
         export CXXFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
