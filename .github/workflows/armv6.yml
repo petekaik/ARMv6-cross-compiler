@@ -68,7 +68,10 @@ jobs:
         linker = "arm-linux-gnueabihf-gcc"
         rustflags = [
           "-C", "target-cpu=arm1176jzf-s",
-          "-C", "link-arg=-Wl,-rpath-link,/usr/lib/arm-linux-gnueabihf"
+          "-C", "target-feature=+vfp",
+          "-C", "link-arg=-march=armv6",
+          "-C", "link-arg=-mfpu=vfp",
+          "-C", "link-arg=-mfloat-abi=hard"
         ]
         EOF
         rustup target add arm-unknown-linux-gnueabihf
@@ -96,14 +99,36 @@ jobs:
       run: |
         cd /tmp/librespot
         
-        # Cross-compilation environment variables
+        export CFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+        export CXXFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+        
+        export CROSS_COMPILE=arm-linux-gnueabihf-
+        
         export PKG_CONFIG_ALLOW_CROSS=1
         export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
         export CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
         
-        export CFLAGS_arm_unknown_linux_gnueabihf="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
-        
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+
+    - name: Validate Binary Architecture (ARMv6 Check)
+      run: |
+        BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
+        
+        echo "Checking binary architecture for $BIN_PATH..."
+        ARCH_INFO=$(readelf -A "$BIN_PATH")
+        echo "$ARCH_INFO"
+        
+        if echo "$ARCH_INFO" | grep -q "Tag_CPU_arch: v6"; then
+          echo "✅ Validation passed: Binary is ARMv6 compatible."
+        else
+          echo "❌ ERROR: Binary is NOT ARMv6! Detected architecture is incorrect."
+          exit 1
+        fi
+
+        if echo "$ARCH_INFO" | grep -iq "NEON"; then
+          echo "❌ ERROR: Binary contains NEON instructions, which are not supported on Pi Zero W!"
+          exit 1
+        fi
 
     - name: Create .deb package with FPM
       id: package
