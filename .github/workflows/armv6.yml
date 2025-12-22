@@ -98,6 +98,23 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-
 
+    - name: Patch ring for ARMv6
+      run: |
+        cd /tmp/librespot
+        
+        # Find ring in the dependency tree and patch its build
+        RING_DIR=$(find ~/.cargo/registry/src -type d -name "ring-0.17.*" | head -1)
+        
+        if [ -n "$RING_DIR" ]; then
+          echo "Found ring at: $RING_DIR"
+          
+          # Patch ring's build.rs to force ARMv6
+          sed -i 's/target_arch = "arm"/target_arch = "armv6"/' "$RING_DIR/build.rs"
+          
+          # Or disable ring's assembly entirely
+          echo 'fn main() {}' > "$RING_DIR/build.rs"
+        fi
+
     - name: Build librespot (Forced ARMv6)
       run: |
         cd /tmp/librespot
