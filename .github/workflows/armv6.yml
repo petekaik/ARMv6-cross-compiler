@@ -99,17 +99,25 @@ jobs:
       run: |
         cd /tmp/librespot
         
+        # 1. Pakotetaan C-kääntäjän liput kaikille työkaluille (cc-rs, jne.)
+        # armv6kz on Pi Zeron tarkka arkkitehtuuri
         export CFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
         export CXXFLAGS="-march=armv6kz -mfpu=vfp -mfloat-abi=hard"
         
+        # 2. Erityisesti 'ring'-cratea varten
+        # Se vaatii nämä muuttujat toimiakseen oikein ARMv6:lla ilman NEONia
         export ST_TARGET=armv6
         export CROSS_COMPILE=arm-linux-gnueabihf-
         
+        # 3. Pkg-config asetukset ristiinkääntöön
         export PKG_CONFIG_ALLOW_CROSS=1
         export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
         
+        # 4. Pakotetaan Rust-kääntäjä ja linkkeri pysymään ARMv6-rajojen sisällä
+        # '-neon' poistaa NEON-tuen nimenomaisesti käytöstä
         export RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp,-neon -C link-arg=-march=armv6kz -C link-arg=-mfpu=vfp -C link-arg=-mfloat-abi=hard"
         
+        # 5. Määritetään kääntäjätyökalut nimenomaisesti
         export CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
         export CXX_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++
         export AR_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar
