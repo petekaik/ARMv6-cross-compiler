@@ -136,6 +136,9 @@ jobs:
         RPI_GCC="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin/arm-linux-gnueabihf-gcc"
         export CC_arm_unknown_linux_gnueabihf="$RPI_GCC"
         export AR_arm_unknown_linux_gnueabihf="${{ env.RPI_TOOLCHAIN_PATH }}/${{ env.RPI_TOOLCHAIN_NAME }}/bin/arm-linux-gnueabihf-ar"
+        export PKG_CONFIG_ALLOW_CROSS=1
+        export PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig
+        export PKG_CONFIG_PATH=""
         export CFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
         export CXXFLAGS="-march=armv6 -mfloat-abi=hard -mfpu=vfp"
         cargo build --target=arm-unknown-linux-gnueabihf --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
@@ -186,6 +189,6 @@ jobs:
         tag_name: ${{ env.TAG_NAME }}
         name: Librespot ARMv6 Package ${{ env.TAG_NAME }}
         body: |
-          Automated cross-compiled Debian package (.deb) for Raspberry Pi Zero W (ARMv6/armhf) on Debian ${{ env.DISTRO_NAME }}.
+          Automated cross-compiled Debian package (.deb) for Raspberry Pi Zero W (ARMv6/armhf) on Debian ${{ matrix.debian_distro }}.
         files: |
           ${{ env.DEB_PACKAGE_NAME }}
