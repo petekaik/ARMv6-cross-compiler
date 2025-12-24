@@ -1,4 +1,4 @@
-name: Build librespot for ARMv6
+name: Build librespot for ARMv6 (Pi Zero)
 
 on:
   workflow_dispatch: {}
@@ -11,198 +11,133 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     strategy:
+      fail-fast: false
       matrix:
+        # Build for multiple Debian versions to ensure library compatibility
         debian_distro: [bullseye, bookworm, trixie]
 
-    container:
-      image: debian:${{ matrix.debian_distro }}
-      options: --user root
-    
     permissions:
       contents: write
 
-    name: Build librespot for ARMv6 on Debian ${{ matrix.debian_distro }}
+    name: Build ARMv6 on ${{ matrix.debian_distro }}
 
     steps:
-    - name: Set up and update build environment base
-      run: |
-        apt-get update
-        apt-get install -y \
-          git pkg-config build-essential curl ruby rubygems \
-          gcc-arm-linux-gnueabihf
-        gem install fpm
-      
-    - name: Set up ARMhf dependencies
-      run: |
-        dpkg --add-architecture armhf
-        apt-get update
-        apt-get install -y \
-          libasound2-dev:armhf \
-          libpulse-dev:armhf \
-          libavahi-client-dev:armhf \
-          libdbus-1-dev:armhf
-
-    - name: Install Rust
-      run: |
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
     - name: Checkout this repository
       uses: actions/checkout@v4
 
-    - name: Clone librespot repository
-      run: |
-        REPO_URL="https://github.com/librespot-org/librespot.git"
-        REPO_PATH="/tmp/librespot"
-        git clone --depth 1 "$REPO_URL" "$REPO_PATH"
-        cd "$REPO_PATH"
-        echo "LIBRESPOT_COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
-    - name: Configure Cargo for ARMv6
-      run: |
-        mkdir -p ~/.cargo/
-        cat <<'EOF' > ~/.cargo/config.toml
-        [target.arm-unknown-linux-gnueabihf]
-        linker = "arm-linux-gnueabihf-gcc"
-        rustflags = [
-          "-C", "target-cpu=arm1176jzf-s",
-          "-C", "target-feature=+vfp2,-neon,-thumb-mode",
-          "-C", "link-arg=-march=armv6",
-          "-C", "link-arg=-mfpu=vfp",
-          "-C", "link-arg=-mfloat-abi=hard"
-        ]
-        
-        [build]
-        target = "arm-unknown-linux-gnueabihf"
-        EOF
-        rustup target add arm-unknown-linux-gnueabihf
-
-    - name: Cargo Registry Cache
+    # Caching Cargo Registry to speed up dependency downloads
+    - name: Cache Cargo Registry
       uses: actions/cache@v4
       with:
         path: |
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('/tmp/librespot/Cargo.lock') }}
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-reg-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-registry-
+          ${{ runner.os }}-cargo-reg-
 
-    - name: Cargo Target Cache
+    # Caching the build target to avoid recompiling everything
+    - name: Cache Cargo Target
       uses: actions/cache@v4
       with:
-        path: /tmp/librespot/target
-        key: ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-${{ env.LIBRESPOT_COMMIT_HASH }}
+        path: ./target-armv6
+        key: ${{ runner.os }}-cargo-target-${{ matrix.debian_distro }}-${{ github.sha }}
         restore-keys: |
-          ${{ runner.os }}-cargo-build-target-${{ matrix.debian_distro }}-
+          ${{ runner.os }}-cargo-target-${{ matrix.debian_distro }}-
 
-    - name: Patch ring for ARMv6
-      run: |
-        cd /tmp/librespot
+    - name: Run Build in Native ARMv6 Environment
+      uses: uraimo/run-on-architecture-action@v2
+      with:
+        arch: armv6
+        distro: ${{ matrix.debian_distro }}
         
-        # Find ring in the dependency tree and patch its build
-        RING_DIR=$(find ~/.cargo/registry/src -type d -name "ring-0.17.*" | head -1)
+        # Mount workspace to share files between host and emulator
+        githubToken: ${{ github.token }}
         
-        if [ -n "$RING_DIR" ]; then
-          echo "Found ring at: $RING_DIR"
+        # Install required ARMv6 system libraries inside the emulator
+        install: |
+          apt-get update
+          apt-get install -y \
+            git curl pkg-config build-essential \
+            libasound2-dev libpulse-dev libavahi-client-dev libdbus-1-dev
           
-          # Patch ring's build.rs to force ARMv6
-          sed -i 's/target_arch = "arm"/target_arch = "armv6"/' "$RING_DIR/build.rs"
+          # Install Rust natively inside the ARMv6 container
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        
+        run: |
+          source $HOME/.cargo/env
           
-          # Or disable ring's assembly entirely
-          echo 'fn main() {}' > "$RING_DIR/build.rs"
-        fi
+          # Clone librespot source
+          REPO_URL="https://github.com/librespot-org/librespot.git"
+          REPO_PATH="/tmp/librespot-src"
+          git clone --depth 1 "$REPO_URL" "$REPO_PATH"
+          cd "$REPO_PATH"
+          
+          # Ensure we use the cached target directory if it exists
+          mkdir -p /github/workspace/target-armv6
+          ln -s /github/workspace/target-armv6 target
 
-    - name: Build librespot (Forced ARMv6)
-      run: |
-        cd /tmp/librespot
-        
-        # Create wrapper script that FORCES ARMv6 for ALL compilation
-        cat <<'EOF' > /tmp/arm-gcc-wrapper.sh
-        #!/bin/bash
-        exec arm-linux-gnueabihf-gcc -march=armv6 -mfpu=vfp -mfloat-abi=hard -marm "$@"
-        EOF
-        chmod +x /tmp/arm-gcc-wrapper.sh
-        
-        # Set ALL environment variables to force ARMv6
-        export CC_arm_unknown_linux_gnueabihf=/tmp/arm-gcc-wrapper.sh
-        export CC=/tmp/arm-gcc-wrapper.sh
-        export AR_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar
-        export AR=arm-linux-gnueabihf-ar
-        export CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER=/tmp/arm-gcc-wrapper.sh
-        
-        # PKG config for cross compilation
-        export PKG_CONFIG_ALLOW_CROSS=1
-        export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
-        export PKG_CONFIG_SYSROOT_DIR=/
-        
-        # Force ARMv6 in all C compilation (for build.rs scripts)
-        export CFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard -marm"
-        export CXXFLAGS="-march=armv6 -mfpu=vfp -mfloat-abi=hard -marm"
-        
-        # Rust flags - disable features that require ARMv7
-        export RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp2,-neon,-thumb-mode -C linker=/tmp/arm-gcc-wrapper.sh"
-        
-        # Build with rustls to avoid OpenSSL native dependencies
-        cargo build --target=arm-unknown-linux-gnueabihf --release \
-          --no-default-features \
-          --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+          # Build librespot. Since we are inside ARMv6, no cross-prefix needed.
+          # We use rustls to avoid native OpenSSL linking issues.
+          cargo build --release \
+            --no-default-features \
+            --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+          
+          # Copy the final binary to workspace for the next steps
+          cp target/release/librespot /github/workspace/librespot-binary-${{ matrix.debian_distro }}
 
-    - name: Validate Binary Architecture (ARMv6 Check)
+    - name: Validate Binary (ARMv6 Verification)
       run: |
-        BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
+        BIN="librespot-binary-${{ matrix.debian_distro }}"
+        echo "Analyzing $BIN..."
+        readelf -A "$BIN"
         
-        echo "Checking binary architecture for $BIN_PATH..."
-        ARCH_INFO=$(readelf -A "$BIN_PATH")
-        echo "$ARCH_INFO"
-        
-        if echo "$ARCH_INFO" | grep -q "Tag_CPU_arch: v6"; then
-          echo "✅ Validation passed: Binary is ARMv6 compatible."
-        elif echo "$ARCH_INFO" | grep -q "Tag_CPU_arch: v7"; then
-          echo "❌ ERROR: Binary is ARMv7, not ARMv6!"
-          echo ""
-          echo "Analyzing which dependencies may have caused ARMv7 code..."
-          # Show all object files in the build
-          find /tmp/librespot/target/arm-unknown-linux-gnueabihf/release -name "*.rlib" -o -name "*.a" | head -20
-          exit 1
+        # Strict check for Tag_CPU_arch: v6
+        if readelf -A "$BIN" | grep -q "Tag_CPU_arch: v6"; then
+          echo "✅ PASS: Architecture is confirmed ARMv6."
         else
-          echo "⚠️  WARNING: Could not determine CPU architecture definitively."
-          echo "Full readelf output:"
-          echo "$ARCH_INFO"
+          echo "❌ FAIL: Architecture is NOT ARMv6. Check logs."
           exit 1
         fi
 
-        if echo "$ARCH_INFO" | grep -iq "NEON"; then
-          echo "❌ ERROR: Binary contains NEON instructions, which are not supported on Pi Zero W!"
-          exit 1
-        fi
-
-        echo "✅ All validations passed! Binary is safe for Raspberry Pi Zero W."
-
-    - name: Create .deb package with FPM
+    - name: Create Debian Package (.deb)
       id: package
       run: |
-        VERSION=$(date +%Y%m%d%H%M%S)
-        BIN_PATH="/tmp/librespot/target/arm-unknown-linux-gnueabihf/release/librespot"
+        # Install FPM on the host (x86) to create the package quickly
+        sudo apt-get update && sudo apt-get install -y ruby ruby-dev rubygems build-essential
+        sudo gem install --no-document fpm
+        
+        VERSION=$(date +%Y%m%d%H%M)
         OUTPUT_NAME="librespot_${VERSION}_armhf_${{ matrix.debian_distro }}.deb"
         
+        # Determine ALSA package name based on Debian version (t64 transition)
         if [ "${{ matrix.debian_distro }}" = "bullseye" ]; then
             ALSA_PKG="libasound2"
         else
             ALSA_PKG="libasound2t64"
         fi
-        
-        fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" --maintainer "Build-Bot <email@github.com>" --description "Librespot for ARMv6 (Raspberry Pi Zero W) on ${{ matrix.debian_distro }}" --depends libpulse0 --depends "$ALSA_PKG" --depends libavahi-client3 --depends libdbus-1-3 --after-install "packaging/postinst" --deb-systemd "packaging/librespot.service" "packaging/librespot.default=/etc/default/librespot" "${BIN_PATH}=/usr/bin/librespot"
+
+        # Build the .deb package
+        fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" \
+          --maintainer "Build-Bot <email@github.com>" \
+          --description "Librespot ARMv6 (Pi Zero) - Debian ${{ matrix.debian_distro }}" \
+          --depends libpulse0 \
+          --depends "$ALSA_PKG" \
+          --depends libavahi-client3 \
+          --depends libdbus-1-3 \
+          --after-install "packaging/postinst" \
+          --deb-systemd "packaging/librespot.service" \
+          "packaging/librespot.default=/etc/default/librespot" \
+          "librespot-binary-${{ matrix.debian_distro }}=/usr/bin/librespot"
             
         echo "TAG_NAME=v${VERSION}-${{ matrix.debian_distro }}" >> $GITHUB_ENV
         echo "DEB_PACKAGE_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
 
-    - name: Upload Artifact
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: librespot-${{ matrix.debian_distro }} 
+        name: librespot-${{ matrix.debian_distro }}
         path: ${{ env.DEB_PACKAGE_NAME }}
 
     - name: Create GitHub Release
@@ -214,6 +149,8 @@ jobs:
         tag_name: ${{ env.TAG_NAME }}
         name: Librespot ARMv6 (${{ matrix.debian_distro }})
         body: |
-          Automated build for ARMv6 (Raspberry Pi Zero/1).
-          Target OS: Debian ${{ matrix.debian_distro }}
+          ### Librespot for Raspberry Pi Zero W / Pi 1
+          - **Architecture:** ARMv6 (32-bit)
+          - **OS Base:** Debian ${{ matrix.debian_distro }}
+          - **Features:** ALSA, PulseAudio, Avahi, Rustls
         files: ${{ env.DEB_PACKAGE_NAME }}
