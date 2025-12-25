@@ -14,14 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # We define the base image manually to bypass missing action templates
-        include:
-          - debian_distro: bullseye
-            base_image: arm32v6/debian:bullseye
-          - debian_distro: bookworm
-            base_image: arm32v6/debian:bookworm
-          - debian_distro: trixie
-            base_image: arm32v6/debian:trixie
+        debian_distro: [bullseye, bookworm, trixie]
 
     permissions:
       contents: write
@@ -48,61 +41,56 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-${{ matrix.debian_distro }}-
 
-    - name: Run Build and Test
-      uses: uraimo/run-on-arch-action@v3
-      with:
-        arch: armv6
-        # Use 'image' instead of 'distro' to avoid "Dockerfile does not exist" error
-        image: ${{ matrix.base_image }}
-        githubToken: ${{ github.token }}
+    - name: Build and Test inside ARMv6 Container
+      run: |
+        # Luodaan rakennusskripti
+        cat <<'EOF' > build_script.sh
+        set -e
+        apt-get update
+        apt-get install -y git curl pkg-config build-essential libasound2-dev libpulse-dev libavahi-client-dev libdbus-1-dev
         
-        install: |
-          apt-get update
-          apt-get install -y git curl pkg-config build-essential libasound2-dev libpulse-dev libavahi-client-dev libdbus-1-dev
-          
-          # Install Rust natively inside the emulated ARMv6 container
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        # Asennetaan Rust
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source $HOME/.cargo/env
         
-        run: |
-          source $HOME/.cargo/env
-          
-          # Clone librespot
-          git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot-src
-          cd /tmp/librespot-src
-          
-          # Use workspace for target storage to persist cache
-          mkdir -p /github/workspace/target-armv6
-          ln -s /github/workspace/target-armv6 target
+        # Haetaan koodi
+        git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot-src
+        cd /tmp/librespot-src
+        
+        # Käytetään välimuistia jos mahdollista
+        if [ -d "/workspace/target-armv6" ]; then
+          mkdir -p target
+          cp -r /workspace/target-armv6/* target/ || true
+        fi
 
-          # Build optimized for Pi Zero
-          cargo build --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
-          
-          # TEST: Ensure it runs on ARMv6 (QEMU will catch illegal instructions here)
-          echo "Testing binary version execution..."
-          ./target/release/librespot --version
-          
-          # EXPORT: Copy to workspace root where the host runner can see it
-          cp ./target/release/librespot /github/workspace/librespot-binary-${{ matrix.debian_distro }}
+        # Rakennus
+        cargo build --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+        
+        # TESTI: Suoritetaan binääri emulaattorissa
+        echo "Verifying binary execution..."
+        ./target/release/librespot --version
+        
+        # Kopioidaan tulokset takaisin
+        cp ./target/release/librespot /workspace/librespot-binary-${{ matrix.debian_distro }}
+        cp -r target/* /workspace/target-armv6/ || true
+        EOF
+
+        chmod +x build_script.sh
+
+        # Ajetaan skripti natiivissa ARMv6-ympäristössä
+        docker run --rm \
+          --platform linux/arm/v6 \
+          -v "${{ github.workspace }}:/workspace" \
+          -w /workspace \
+          arm32v6/debian:${{ matrix.debian_distro }} \
+          /bin/bash /workspace/build_script.sh
 
     - name: Final Architecture Validation
       run: |
         BIN="librespot-binary-${{ matrix.debian_distro }}"
-        
-        if [ ! -f "$BIN" ]; then
-          echo "❌ ERROR: $BIN not found! Printing workspace content:"
-          ls -F
-          exit 1
-        fi
-        
         echo "Validating $BIN with readelf..."
-        readelf -A "$BIN"
-        
-        if readelf -A "$BIN" | grep -q "Tag_CPU_arch: v6"; then
-          echo "✅ Success: Binary is ARMv6."
-        else
-          echo "❌ Error: Binary is NOT ARMv6!"
-          exit 1
-        fi
+        readelf -A "$BIN" | grep "Tag_CPU_arch: v6" || (echo "❌ Not ARMv6!" && exit 1)
+        echo "✅ Architecture confirmed as ARMv6."
 
     - name: Create Debian Package (.deb)
       id: package
@@ -112,19 +100,17 @@ jobs:
         
         VERSION=$(date +%Y%m%d%H%M)
         OUTPUT_NAME="librespot_${VERSION}_armhf_${{ matrix.debian_distro }}.deb"
-        
-        # Determine ALSA package (t64 transition in newer Debian)
         ALSA_PKG="libasound2"
         [ "${{ matrix.debian_distro }}" != "bullseye" ] && ALSA_PKG="libasound2t64"
         
         mkdir -p packaging
-        [ ! -f packaging/librespot.service ] && echo -e "[Unit]\nDescription=Librespot\n[Service]\nExecStart=/usr/bin/librespot\n[Install]\nWantedBy=multi-user.target" > packaging/librespot.service
-        [ ! -f packaging/postinst ] && echo -e "#!/bin/sh\nif ! id librespot >/dev/null 2>&1; then useradd -r -M librespot; fi\nsystemctl daemon-reload" > packaging/postinst && chmod +x packaging/postinst
-        [ ! -f packaging/librespot.default ] && echo 'LIBRESPOT_OPTS="--name PiZero"' > packaging/librespot.default
+        echo -e "[Unit]\nDescription=Librespot\n[Service]\nExecStart=/usr/bin/librespot\n[Install]\nWantedBy=multi-user.target" > packaging/librespot.service
+        echo -e "#!/bin/sh\nsystemctl daemon-reload" > packaging/postinst && chmod +x packaging/postinst
+        echo 'LIBRESPOT_OPTS="--name PiZero"' > packaging/librespot.default
 
         fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" \
           --maintainer "Build-Bot <email@github.com>" \
-          --description "Librespot for ARMv6 Pi Zero - ${{ matrix.debian_distro }}" \
+          --description "Librespot ARMv6 (Pi Zero) - Debian ${{ matrix.debian_distro }}" \
           --depends libpulse0 --depends "$ALSA_PKG" --depends libavahi-client3 --depends libdbus-1-3 \
           --after-install "packaging/postinst" \
           --deb-systemd "packaging/librespot.service" \
