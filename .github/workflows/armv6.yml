@@ -47,7 +47,7 @@ jobs:
           ${{ runner.os }}-cargo-target-${{ matrix.debian_distro }}-
 
     - name: Run Build in Native ARMv6 Environment
-      uses: uraimo/run-on-architecture-action
+      uses: uraimo/run-on-architecture-action@v3
       with:
         arch: armv6
         distro: ${{ matrix.debian_distro }}
