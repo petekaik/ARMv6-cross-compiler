@@ -14,7 +14,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Build for multiple Debian versions to ensure library compatibility
         debian_distro: [bullseye, bookworm, trixie]
 
     permissions:
@@ -23,109 +22,106 @@ jobs:
     name: Build ARMv6 on ${{ matrix.debian_distro }}
 
     steps:
-    - name: Checkout this repository
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Caching Cargo Registry to speed up dependency downloads
-    - name: Cache Cargo Registry
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm
+
+    - name: Cache Cargo
       uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-        key: ${{ runner.os }}-cargo-reg-${{ hashFiles('**/Cargo.lock') }}
+          target-armv6
+        key: ${{ runner.os }}-cargo-${{ matrix.debian_distro }}-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-reg-
+          ${{ runner.os }}-cargo-${{ matrix.debian_distro }}-
 
-    # Caching the build target to avoid recompiling everything
-    - name: Cache Cargo Target
-      uses: actions/cache@v4
-      with:
-        path: ./target-armv6
-        key: ${{ runner.os }}-cargo-target-${{ matrix.debian_distro }}-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-target-${{ matrix.debian_distro }}-
-
-    - name: Run Build in Native ARMv6 Environment
+    - name: Run Build and Test
       uses: uraimo/run-on-arch-action@v3
       with:
         arch: armv6
         distro: ${{ matrix.debian_distro }}
-        
-        # Mount workspace to share files between host and emulator
         githubToken: ${{ github.token }}
         
-        # Install required ARMv6 system libraries inside the emulator
+        # Mapping workspace to host
+        dockerRunArgs: |
+          --volume "${{ github.workspace }}:/workspace"
+        
         install: |
           apt-get update
-          apt-get install -y \
-            git curl pkg-config build-essential \
-            libasound2-dev libpulse-dev libavahi-client-dev libdbus-1-dev
-          
-          # Install Rust natively inside the ARMv6 container
+          apt-get install -y git curl pkg-config build-essential libasound2-dev libpulse-dev libavahi-client-dev libdbus-1-dev
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         
         run: |
           source $HOME/.cargo/env
           
-          # Clone librespot source
-          REPO_URL="https://github.com/librespot-org/librespot.git"
-          REPO_PATH="/tmp/librespot-src"
-          git clone --depth 1 "$REPO_URL" "$REPO_PATH"
-          cd "$REPO_PATH"
+          # Clone librespot
+          git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot-src
+          cd /tmp/librespot-src
           
-          # Ensure we use the cached target directory if it exists
-          mkdir -p /github/workspace/target-armv6
-          ln -s /github/workspace/target-armv6 target
+          # Use the shared workspace for target storage to persist cache
+          mkdir -p /workspace/target-armv6
+          ln -s /workspace/target-armv6 target
 
-          # Build librespot. Since we are inside ARMv6, no cross-prefix needed.
-          # We use rustls to avoid native OpenSSL linking issues.
-          cargo build --release \
-            --no-default-features \
-            --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
+          # Build
+          cargo build --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
           
-          # Copy the final binary to workspace for the next steps
-          cp target/release/librespot /github/workspace/librespot-binary-${{ matrix.debian_distro }}
+          # Verification test inside the container
+          echo "Testing binary version..."
+          ./target/release/librespot --version
+          
+          # CRITICAL: Copy directly to the mapped workspace root
+          cp ./target/release/librespot /workspace/librespot-binary-${{ matrix.debian_distro }}
+          echo "Binary copied to workspace."
 
-    - name: Validate Binary (ARMv6 Verification)
+    - name: Final Architecture Validation
       run: |
         BIN="librespot-binary-${{ matrix.debian_distro }}"
+        
+        # Debugging: List files if bin is missing
+        if [ ! -f "$BIN" ]; then
+          echo "❌ ERROR: $BIN not found in current directory!"
+          echo "Current directory content:"
+          ls -F
+          exit 1
+        fi
+        
         echo "Analyzing $BIN..."
         readelf -A "$BIN"
         
-        # Strict check for Tag_CPU_arch: v6
         if readelf -A "$BIN" | grep -q "Tag_CPU_arch: v6"; then
-          echo "✅ PASS: Architecture is confirmed ARMv6."
+          echo "✅ Success: Binary is ARMv6."
         else
-          echo "❌ FAIL: Architecture is NOT ARMv6. Check logs."
+          echo "❌ Error: Binary is NOT ARMv6!"
           exit 1
         fi
 
     - name: Create Debian Package (.deb)
       id: package
       run: |
-        # Install FPM on the host (x86) to create the package quickly
         sudo apt-get update && sudo apt-get install -y ruby ruby-dev rubygems build-essential
         sudo gem install --no-document fpm
         
         VERSION=$(date +%Y%m%d%H%M)
         OUTPUT_NAME="librespot_${VERSION}_armhf_${{ matrix.debian_distro }}.deb"
+        ALSA_PKG="libasound2"
+        [ "${{ matrix.debian_distro }}" != "bullseye" ] && ALSA_PKG="libasound2t64"
         
-        # Determine ALSA package name based on Debian version (t64 transition)
-        if [ "${{ matrix.debian_distro }}" = "bullseye" ]; then
-            ALSA_PKG="libasound2"
-        else
-            ALSA_PKG="libasound2t64"
-        fi
+        # Packaging setup
+        mkdir -p packaging
+        [ ! -f packaging/librespot.service ] && echo -e "[Unit]\nDescription=Librespot\n[Service]\nExecStart=/usr/bin/librespot\n[Install]\nWantedBy=multi-user.target" > packaging/librespot.service
+        [ ! -f packaging/postinst ] && echo -e "#!/bin/sh\nsystemctl daemon-reload" > packaging/postinst && chmod +x packaging/postinst
+        [ ! -f packaging/librespot.default ] && echo 'LIBRESPOT_OPTS="--name PiZero"' > packaging/librespot.default
 
-        # Build the .deb package
         fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" \
           --maintainer "Build-Bot <email@github.com>" \
           --description "Librespot ARMv6 (Pi Zero) - Debian ${{ matrix.debian_distro }}" \
-          --depends libpulse0 \
-          --depends "$ALSA_PKG" \
-          --depends libavahi-client3 \
-          --depends libdbus-1-3 \
+          --depends libpulse0 --depends "$ALSA_PKG" --depends libavahi-client3 --depends libdbus-1-3 \
           --after-install "packaging/postinst" \
           --deb-systemd "packaging/librespot.service" \
           "packaging/librespot.default=/etc/default/librespot" \
@@ -143,14 +139,7 @@ jobs:
     - name: Create GitHub Release
       if: github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ env.TAG_NAME }}
         name: Librespot ARMv6 (${{ matrix.debian_distro }})
-        body: |
-          ### Librespot for Raspberry Pi Zero W / Pi 1
-          - **Architecture:** ARMv6 (32-bit)
-          - **OS Base:** Debian ${{ matrix.debian_distro }}
-          - **Features:** ALSA, PulseAudio, Avahi, Rustls
         files: ${{ env.DEB_PACKAGE_NAME }}
