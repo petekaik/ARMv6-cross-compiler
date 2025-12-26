@@ -14,6 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Balena maintains high-quality ARMv6 images for these Debian versions
         debian_distro: [bullseye, bookworm, trixie]
 
     permissions:
@@ -25,11 +26,13 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    # Register QEMU to allow running ARM binaries on x64 host
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
       with:
         platforms: arm
 
+    # Cache Cargo registry and target to significantly speed up subsequent builds
     - name: Cache Cargo
       uses: actions/cache@v4
       with:
@@ -43,74 +46,83 @@ jobs:
 
     - name: Build and Test inside ARMv6 Container
       run: |
-        # Luodaan rakennusskripti
+        # Create the build script dynamically on the host
         cat <<'EOF' > build_script.sh
         set -e
         apt-get update
+        # Install required development libraries for audio and networking
         apt-get install -y git curl pkg-config build-essential libasound2-dev libpulse-dev libavahi-client-dev libdbus-1-dev
         
-        # Asennetaan Rust
+        # Install Rust toolchain natively within the emulated environment
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         source $HOME/.cargo/env
         
-        # Haetaan koodi
+        # Fetch the latest librespot source code
         git clone --depth 1 https://github.com/librespot-org/librespot.git /tmp/librespot-src
         cd /tmp/librespot-src
         
-        # Käytetään välimuistia jos mahdollista
+        # Link persistent target directory to leverage GitHub Actions cache
         if [ -d "/workspace/target-armv6" ]; then
           mkdir -p target
           cp -r /workspace/target-armv6/* target/ || true
         fi
 
-        # Rakennus
+        # Build librespot with features optimized for Raspberry Pi
         cargo build --release --no-default-features --features "rustls-tls-webpki-roots alsa-backend pulseaudio-backend with-avahi"
         
-        # TESTI: Suoritetaan binääri emulaattorissa
+        # Verify the binary runs (QEMU will fail here if instructions are incompatible with ARMv6)
         echo "Verifying binary execution..."
         ./target/release/librespot --version
         
-        # Kopioidaan tulokset takaisin
+        # Copy the resulting binary and build artifacts back to the host workspace
         cp ./target/release/librespot /workspace/librespot-binary-${{ matrix.debian_distro }}
         cp -r target/* /workspace/target-armv6/ || true
         EOF
 
         chmod +x build_script.sh
 
-        # Ajetaan skripti natiivissa ARMv6-ympäristössä
+        # Execute build using Balena's true ARMv6 image (optimized for Pi Zero)
         docker run --rm \
           --platform linux/arm/v6 \
           -v "${{ github.workspace }}:/workspace" \
           -w /workspace \
-          arm32v6/debian:${{ matrix.debian_distro }} \
+          balenalib/raspberry-pi-debian:${{ matrix.debian_distro }}-build \
           /bin/bash /workspace/build_script.sh
 
     - name: Final Architecture Validation
       run: |
         BIN="librespot-binary-${{ matrix.debian_distro }}"
-        echo "Validating $BIN with readelf..."
-        readelf -A "$BIN" | grep "Tag_CPU_arch: v6" || (echo "❌ Not ARMv6!" && exit 1)
-        echo "✅ Architecture confirmed as ARMv6."
+        echo "Validating $BIN architecture using readelf..."
+        readelf -A "$BIN" | grep "Tag_CPU_arch: v6" || (echo "❌ FAILED: Binary is not ARMv6!" && exit 1)
+        echo "✅ SUCCESS: Architecture confirmed as ARMv6."
 
     - name: Create Debian Package (.deb)
-      id: package
       run: |
+        # Install FPM packaging tool on the host
         sudo apt-get update && sudo apt-get install -y ruby ruby-dev rubygems build-essential
         sudo gem install --no-document fpm
         
         VERSION=$(date +%Y%m%d%H%M)
         OUTPUT_NAME="librespot_${VERSION}_armhf_${{ matrix.debian_distro }}.deb"
+        
+        # Handle the Debian 't64' library transition for newer releases
         ALSA_PKG="libasound2"
         [ "${{ matrix.debian_distro }}" != "bullseye" ] && ALSA_PKG="libasound2t64"
         
+        # Prepare packaging files (Systemd service and default config)
         mkdir -p packaging
-        echo -e "[Unit]\nDescription=Librespot\n[Service]\nExecStart=/usr/bin/librespot\n[Install]\nWantedBy=multi-user.target" > packaging/librespot.service
-        echo -e "#!/bin/sh\nsystemctl daemon-reload" > packaging/postinst && chmod +x packaging/postinst
-        echo 'LIBRESPOT_OPTS="--name PiZero"' > packaging/librespot.default
+        echo -e "[Unit]\nDescription=Librespot\nAfter=network.target sound.target\n\n[Service]\nExecStart=/usr/bin/librespot \$LIBRESPOT_OPTS\nEnvironmentFile=/etc/default/librespot\nRestart=always\nUser=librespot\nGroup=audio\n\n[Install]\nWantedBy=multi-user.target" > packaging/librespot.service
+        
+        # Post-install script to create the service user
+        echo -e "#!/bin/sh\nif ! id librespot >/dev/null 2>&1; then useradd -r -M -G audio librespot; fi\nsystemctl daemon-reload" > packaging/postinst 
+        chmod +x packaging/postinst
+        
+        echo 'LIBRESPOT_OPTS="--name '\''Raspberry Pi Zero'\'' --backend alsa --bitrate 320"' > packaging/librespot.default
 
+        # Assemble the .deb package
         fpm -s dir -t deb -a armhf -n librespot -v "${VERSION}" -p "${OUTPUT_NAME}" \
           --maintainer "Build-Bot <email@github.com>" \
-          --description "Librespot ARMv6 (Pi Zero) - Debian ${{ matrix.debian_distro }}" \
+          --description "Librespot for ARMv6 (Pi Zero) - Compiled on ${{ matrix.debian_distro }}" \
           --depends libpulse0 --depends "$ALSA_PKG" --depends libavahi-client3 --depends libdbus-1-3 \
           --after-install "packaging/postinst" \
           --deb-systemd "packaging/librespot.service" \
@@ -132,4 +144,5 @@ jobs:
       with:
         tag_name: ${{ env.TAG_NAME }}
         name: Librespot ARMv6 (${{ matrix.debian_distro }})
+        body: "Automated build of Librespot for ARMv6 devices (Raspberry Pi Zero/1). Target: Debian ${{ matrix.debian_distro }}."
         files: ${{ env.DEB_PACKAGE_NAME }}
